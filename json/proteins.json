@@ -1,0 +1,46 @@
+{
+    "Spike":[
+              ["S1A domain",1,302],
+              ["S1A-S1B linker",303,332],
+              ["S1B domain",333,527],
+              ["S1B - S1C linker",528,533],
+              ["S1C domain",534,589],
+              ["S1C - S1D linker",590,593],
+              ["S1D domain",594,674],
+              ["Protease cleavage site",675,692],
+              ["S1-S2 subunits linker",693,710],
+              ["Central β-strand",711,737],
+              ["Downward helix",738,782],
+              ["S2’ cleavage site",783,815],
+              ["Fusion peptide",816,828],
+              ["Connecting region",829,911],
+              ["Heptad repeat region 1",912,983],
+              ["Central helix",984,1034],
+              ["β-hairpin",1035,1068],
+              ["β-sheet domain",1069,1133],
+              ["Heptad repeat region 2",1134,1213],
+              ["Transmembrane region",1214,1236],
+              ["Cytoplasmic region",1237,1508]
+    ],
+    "M":[
+          ["N – Terminal (NTD)",1,19],
+          ["TMl",20,40],
+          ["Mnone",41,50],
+          ["TMll",51,71],
+          ["Mnone",72,79],
+          ["TMlll",80,100],
+          ["C-Terminal (CTD)",101,222]
+     ],
+    "N":[
+          ["N-terminal (NTD)",1,50],
+          ["Dominio de unión al ARN (RBD)",51,174],
+          ["Enlazador central desordenado predicho (LINK)",175,246],
+          ["Dominio de dimerización",247,365],
+          ["C-terminal (CTD)",366,419]
+     ],
+     "E":[
+          ["N-termina",1,16],
+          ["Transmembranal (TMD)",17,36],
+          ["C-Terminal",37,76]
+     ]
+     }
