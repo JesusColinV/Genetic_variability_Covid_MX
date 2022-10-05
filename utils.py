@@ -4,88 +4,148 @@ Created on Sat Sep 24 17:40:00 2022
 
 @author: JESUS ALEJANDRO COLIN VILCHIS
 """
+
+# Pandas
 import pandas as pd
+
+# Numpy
+import numpy as np
+
+# Python
 import datetime
 from concurrent.futures import ThreadPoolExecutor
 import os
+
+# Regular expressions
 import re
+
+# JSON
 import json
+
+# Logging
 import logging
-import numpy as np
+
+# SciPy
 from scipy import stats
 
 class Files:
-    
-    @staticmethod
-    def load_files(path:str) -> dict:
-        df = pd.read_csv(path,sep="\t")
-        return df
-    
-    @staticmethod
-    def load_dict(dir:str) -> dict:
-        """_summary_
-            Cargamos los catalogos con la logica del analisis
-        Args:
-            None
+    """
+    File management class
 
+    """
+        
+    @staticmethod
+    def load_dict( dir : str ) -> dict:
+        """ We load the metadata prepared in json format
+
+        Args:
+            dir (str): json file location
+    
         Returns:
-            dictionaries: catalogos con la logica del analisis
+            dictionaries (dict): metadata
         """
+        
         dictionaries = dict()
-        #dictionaries[f'{age_quinquennia}'] = age_quinquennia
         files = os.listdir(dir)
+        
+        
         for file in files:
+            
             with open(f"{dir}/{file}", 'r',encoding="utf-8") as f:
+                
                 dictionaries[file[:-5]] = json.load(f)
+                
+                
         return dictionaries
     
     @staticmethod
-    def complete(df:pd.DataFrame, *args, **kwargs) -> pd.DataFrame:
-        """_summary_
-            Cargamos los catalogos con la logica del analisis
+    def complete( df : pd.DataFrame) -> pd.DataFrame:
+        """ Generate the columns with the data to be processed
+        
         Args:
-            df (DataFrame): el archivo a orginal a analizar
+            df (DataFrame): dataframe with the original data
     
         Returns:
-            dictionaries: catalogos con la logica del analisis
+            df (DataFrame): dataframe with preprocessed data
         """
+        
+        # dates are cleared that comply with the format
         df_cleaned = df[df['Collection date'].str.len()>7]
+        
         del df
-        df_cleaned['date'] = [datetime.datetime.strptime(i,'%Y-%m-%d').isocalendar() for i in df_cleaned['Collection date']]
+        
+        # change of string data to datetime, with iso calendar format
+        df_cleaned['date'] = [
+            datetime.datetime.strptime(i,'%Y-%m-%d').isocalendar() 
+            for i in df_cleaned['Collection date']
+            ]
+        
+        # Parallel processes
         with ThreadPoolExecutor(max_workers = 4) as executor:
+            
             f1 = executor.submit(m_year,df_cleaned)
             f2 = executor.submit(m_week,df_cleaned)
             f3 = executor.submit(m_week_cont,df_cleaned)
             f4 = executor.submit(m_state,df_cleaned)
+            
+        # Assignment to new columns
         df_cleaned['Year'] = f1.result()
         df_cleaned["week"] = f2.result() 
         df_cleaned["week_cont"] = f3.result() 
         df_cleaned['state'] = f4.result()
+        
+        
         return df_cleaned
     
     @staticmethod
-    def normalize(df:pd.DataFrame,dictionaries:dict) -> pd.DataFrame:
-        #dic_normalizer = {category : None for category in ("state","group_age","group_patient_status","age")}
+    def normalize( df : pd.DataFrame, dictionaries : dict ) -> pd.DataFrame:
+        """ From the cleaned data, we normalize columns that will be used for analysis.
+
+        Args:
+            df (pd.DataFrame): cleaned data
+            dictionaries (dict): metadata catalog
+
+        Returns:
+            pd.DataFrame: standardized data
+        """
+        
+        # Parallel processes        
         with ThreadPoolExecutor(max_workers = 4) as executor:
+            
             f1 = executor.submit(linage_normalized,df['Lineage'],dictionaries["variant_types"])
             f2 = executor.submit(age_normalized,df[['Patient age','Gender']],dictionaries["age_unification"])
             f3 = executor.submit(state_group_patient_status,df['Patient status'],dictionaries["patient_status"])
             f4 = executor.submit(state_normalized,df['state'],dictionaries["states_types"],dictionaries["unique_states_types"])
+        
+        # Assignment to new columns
         df['variant_type'] = f1.result()           
         df[['age','group_age']] = f2.result()          
         df['group_status'] =  f3.result()              
         df[['state_key','region_key']] = f4.result()
-        #df = self.filter_age(df,*args,**kwargs)  
+
         return df
     
     @staticmethod
-    def filter_age(df,age):
-            if bool(len(age)):
-              if age == "under18":
-                df = df[df['age']<18]
-              elif age == "over18":
-                df = df[df['age']>=18]
-            return df
+    def filter_age(df: pd.DataFrame, age:str) -> pd.DataFrame:
+        """ Data frame filtering from an age trigger
+
+        Args:
+            df (pd.DataFrame): Complete table
+            age (str): trigger
+
+        Returns:
+            pd.DataFrame: Filtered table
+        """
+        # Filter application conditional
+        if bool(len(age)):
+            
+            if age == "under18":
+                df = df.query('age < 18')
+                
+            elif age == "over18":
+                df = df.query('age >= 18')
+                
+        return df
 
 
 
@@ -93,36 +153,83 @@ class Counter:
 
     
     @staticmethod
-    def get_mutations(df,parts_protein:dict,protein:tuple = ("Spike_","E_","N_","M_","NSP")) -> dict:
-        search_amino = lambda segment,sustitution : [aa for user in sustitution 
-                                                     for aa in user.replace(r'(','').replace(r')','').split(',')
-                                                        if bool(re.search(segment,aa))]
+    def get_mutations( 
+        df : pd.DataFrame,
+        parts_protein : dict,
+        protein : tuple = ("Spike_","E_","N_","M_","NSP")
+        ) -> dict:
+        """ Mutation count by protein
+
+        Args:
+            df (pd.DataFrame): the standardized table of GISAID records
+            parts_protein (dict): dictionary with proteins and their segments
+            protein (tuple, optional): proteins of occurrence of mutations. Defaults to ("Spike_","E_","N_","M_","NSP").
+
+        Returns:
+            dict: table of each protein with the columns of the mutation count and its characteristics
+        """
+        # returns the amino acids that belong to the protein delivered as a parameter
+        search_amino = lambda segment,sustitution : [
+            aa for record in sustitution 
+                for aa in record.replace(r'(','').replace(r')','').split(',')
+                    if bool(re.search(segment,aa))
+                    ]
+        
+        # Position of the amino acid mutation
         position = lambda val : int(re.findall("\d+",val.split('_')[1])[0])
-        table = lambda val,count,aa: [(val[i],count[i],val[i].split('_')[0],position(val[i]), p_p(val[i],aa)) for i in range(len(val))]
-        table2 = lambda val,count: [(val[i],count[i],val[i].split('_')[0],position(val[i])) for i in range(len(val))]
+        
+        # from each amino acid in protein, the characteristics are counted and obtained
+        table_protein = lambda val,count,aa: [
+            (val[i],count[i],val[i].split('_')[0],
+            position(val[i]), p_p(val[i],aa)) 
+            for i in range(len(val))]
+        
+        # from each amino acid in nonstructural protein, the characteristics are counted and obtained
+        table_nsp = lambda val,count: [
+            (val[i],count[i],val[i].split('_')[0],position(val[i])) 
+            for i in range(len(val))]
+        
+        # returns unique mutations and their count
         v_c = lambda val: np.unique(val, return_counts=True)
-        # devuelve la porcion de proteina a la que pertenece , dada una mutación y si tipo de segmento
-        p_p = lambda val,aa:  [pp[0] for pp in parts_protein[aa] if position(val) in range(pp[1],pp[2]+1)][0]
+        
+        # returns the portion of protein to which it belongs, given a mutation and its segment name
+        p_p = lambda val,aa:  [
+            pp[0] 
+            for pp in parts_protein[aa] 
+            if position(val) in range(pp[1],pp[2]+1)
+            ][0]
+        
         
         with ThreadPoolExecutor(max_workers=len(protein)) as executor:
-            futures = list()
-            unique = list()
-            futures.append(executor.submit(search_amino,protein[0],df['AA Substitutions']))
-            futures.append(executor.submit(search_amino,protein[1],df['AA Substitutions']))
-            futures.append(executor.submit(search_amino,protein[2],df['AA Substitutions']))
-            futures.append(executor.submit(search_amino,protein[3],df['AA Substitutions']))
-            futures.append(executor.submit(search_amino,protein[4],df['AA Substitutions']))
+            
+            # parallel processes for each type of protein
+            futures = [
+                executor.submit(
+                            search_amino,
+                            protein[i],
+                            df['AA Substitutions']
+                        ) for i in range(5)]
+            
             values = [f.result() for f in futures]
-            for i,aa in enumerate(protein[:-1]):
+            
+            unique = list()
+            
+            for i, aa in enumerate(protein[:-1]):
                 v,c = v_c(values[i])
-                unique.append(executor.submit(table,v,c,aa[:-1]))
+                unique.append(executor.submit(table_protein,v,c,aa[:-1]))
+                
             v,c = v_c(values[-1])
-            unique.append(executor.submit(table2,v,c))
-        amino = {protein[i]:u.result() for i,u in enumerate(unique)}
+            unique.append(executor.submit(table_nsp,v,c))
+            
+        amino = {
+            protein[i]:u.result() 
+            for i,u in enumerate(unique)
+            }
+        
         return amino
     
     @staticmethod
-    def get_table(amino,parts_protein:dict,txt:str = ""):
+    def get_table(amino : dict) -> dict:
         #, #Guruprasad L. Human SARS CoV-2 spike protein mutations. Proteins. 2021 May;89(5):569-576. doi: 10.1002/prot.26042. Epub 2021 Jan 17. PMID: 33423311; PMCID: PMC8014176
         futures = list()
         create_df = lambda table, segment: pd.DataFrame(
@@ -131,27 +238,55 @@ class Counter:
                                                 ) if segment != "NSP" else pd.DataFrame(
                                                     table, 
                                                     columns=[segment,"count","full","change"])
+                                                
+                                                
         with ThreadPoolExecutor(max_workers=len(amino.keys())) as executor:
+            
             for k,v in amino.items():
                 futures.append(executor.submit(create_df,v,k))
-            dfs = {k:futures[i].result() for i,k in enumerate(amino.keys())}
-        save_files(dfs)
+                
+            dfs = {
+                k:futures[i].result() 
+                for i,k in enumerate(amino.keys())
+                }
+
+        # dfs.to_csv("table.csv")
         return dfs
     
     @staticmethod
-    def properties_mutations(df,aminos:list):
+    def properties_mutations(
+        df : pd.DataFrame,
+        aminos : list
+        ) -> dict:
+        """_summary_
+
+        Args:
+            df (pd.DataFrame): _description_
+            aminos (list): _description_
+
+        Returns:
+            dict: _description_
+        """
+        
         df_amino_changes = dict()
+        
+        # For each amino acid
         for change in set(aminos):
+            
+            
             df_amino_changes[change] = {i:0 for i in df['variant_type'].unique()} 
-            for i in range(len(df)): # recorre todos los registros existentes  
+            
+            # For each of the records
+            for i in range(len(df)): 
+                 
+                 
                 if re.search(str(change),df['AA Substitutions'].iloc[i]) is not None:
+                    
                     df_amino_changes[change][df['variant_type'].iloc[i]] +=1
+                    
+                    
         return df_amino_changes
     
-def save_files(files):
-    for k,v in files.items():
-        v.to_csv(f"files/{k}.csv")
-        #print(k)
 
 def add_p_value_annotation(fig, array_columns, subplot=None, _format=dict(interline=0.07, text_height=1.07, color='black')):
     ''' Adds notations giving the p-value between two box plot data (t-test two-sided comparison)
@@ -256,7 +391,6 @@ def add_p_value_annotation(fig, array_columns, subplot=None, _format=dict(interl
         ))
     return fig
 
-   
     
 def m_year(df_cleaned:pd.DataFrame) -> list:
     return [datetime.datetime.strptime(i,'%Y-%m-%d').year for i in df_cleaned['Collection date']]
@@ -273,7 +407,6 @@ def m_week_cont(df_cleaned:pd.DataFrame) -> list:
 
 def m_state(df_cleaned:pd.DataFrame) -> list:
     return [i.split('/')[2]for i in df_cleaned['Location']]
-
 
 
 def linage_normalized(df:pd.DataFrame, dic:dict) -> list:
@@ -293,7 +426,17 @@ def linage_normalized(df:pd.DataFrame, dic:dict) -> list:
     return variant
 
 
-def get_quinquenios(val):
+def get_quinquenios(val:int):
+    """ Given an age number recognizes to which five-year period it belongs
+
+    Args:
+        val (int): Age
+
+    Returns:
+        val (int): Age
+        k (int): five-year period in which it was classified
+    """
+    
     age_quinquennia = {
         -1:[-1],
         1: [0],
@@ -307,56 +450,85 @@ def get_quinquenios(val):
         9:range(50,60),
         10:range(60,150)
     } 
+    
+    # goes through the five-year period to determine which classification it belongs to
     for k,v in age_quinquennia.items():
         if val in v:
             return (val,k)
 
 
-def age_normalized(df,dic)-> list:
-    """_summary_
-        noramliza edad y edge group
+def age_normalized(df : pd.DataFrame)-> list:
+    """ Normalizes the age of patients and recognizes which group they belong to
+
     Args:
-        df (_type_): _description_
-        dic (_type_): _description_
+        df (pd.DataFrame): data from the gisaid database
 
     Returns:
         list: _description_
     """
+    
     variant = list()
+    
+    
     for i in range(len(df)):  
+        
         try:
+            
             val = int(df['Patient age'].iloc[i])
             variant.append(get_quinquenios(val)) 
+            
         except:
+            
+            # Adapts the age data, previously recognizing in which fields it can be found, 
+            # due to a probelma in the storage
             if df['Patient age'].iloc[i].lower() in dic.keys():
+                
                 val = dic[df['Patient age'].iloc[i].lower()]
                 variant.append(get_quinquenios(val))
+                
             elif df['Patient age'].iloc[i] in ['Hospitalized', 'Ambulatory','Male','Female']:
+                
                 variant.append(get_quinquenios(int(df['Gender'].iloc[i])))
+                
             elif bool(re.search('A',df['Patient age'].iloc[i])):
+                
                 val = re.search('A',df['Patient age'].iloc[i])
                 variant.append(get_quinquenios(int(df['Patient age'].iloc[i][:val.span()[0]])))
+                
             elif bool(re.search('onths',df['Patient age'].iloc[i])):# referencia a meses
+                
                 variant.append(get_quinquenios(0))
+                
             elif bool(re.search('\.',df['Patient age'].iloc[i])):
+                
                 val = re.search('\.',df['Patient age'].iloc[i])
                 variant.append(get_quinquenios(int(df['Patient age'].iloc[i][:val.span()[0]])))
+                
             else:
+                
                 variant.append(get_quinquenios(-1))
                 logging.error("No se identificó la edad:" + df['Patient age'].iloc[i])
+                
+                
     return variant
 
 
 def state_normalized(df,dic,dic_k) -> list:
-    """_summary_
-        clave y valor real del estado unificado
+    """ Unify the names in the status column
+    
     Args:
         df (DataFrame): _description_
         dic (dict): _description_
     Returns:
         list<tuple>: clave y valor de estados 
-    """   
-    evaluate = lambda _df: (_df,dic_k[str(_df)]) if str(_df) in dic_k.keys() else (99,"Extra")
+    """  
+    
+    #for each State value is assigned to a tuple the state and its key
+    evaluate = lambda _df: (
+        _df,dic_k[str(_df)]
+        ) if str(_df) in dic_k.keys() else (99,"Extra")
+    
+    # The list of states with unified names is returned
     return [evaluate(dic[_df]) for _df in df] 
 
 
@@ -374,9 +546,10 @@ def state_group_patient_status(df:pd.DataFrame, dic:dict) -> list:
 
 
     
-def counter(df,dic):    
+def counter( df : pd.DataFrame, dic : dict):
         amino_unique = Counter.get_mutations(df,dic)
-        return Counter.get_table(amino_unique,dic)
+        table = Counter.get_table(amino_unique,dic)
+        return table
 
 def autoadjust(df, sheetname, writer):
     df.to_excel(writer, sheet_name=sheetname, index=False, startrow=1)
@@ -434,3 +607,86 @@ def get_states(normalized_file, dictionaries):
                 print(ex,week,s_k)
     return table
     
+def count_representative_state(
+    writer:pd.ExcelWriter,
+    normalized_file:pd.DataFrame,
+    dictionaries:dict ,
+    table:dict = dict(), 
+    period:dict = dict()
+    ):
+
+    for state_key in normalized_file['state_key'].unique():
+        my_key = dictionaries["unique_states_types"][str(state_key)]
+        df_2 = normalized_file.query(f'state_key == {state_key}')[['week_cont','variant_type']].groupby(['week_cont','variant_type']).size(
+                        ).reset_index(name='patients')
+        table[my_key]=dict()
+        period[my_key]={'Alpha':[], 'Delta':[], 'Gamma':[], 'Omicron':[],'Otro':[],'Ninguno':[]}
+        
+        counting_representative(table, period, my_key, df_2, writer)
+        
+def count_representative_country(
+    writer:pd.ExcelWriter,
+    normalized_file:pd.DataFrame,
+    table:dict = dict(), 
+    period:dict = dict(),
+    my_key:str = 'Pais'
+):   
+    df_2 = normalized_file[['week_cont','variant_type']].groupby(['week_cont','variant_type']).size(
+                    ).reset_index(name='patients')
+    table[my_key]=dict()
+    period[my_key]={'Alpha':[], 'Delta':[], 'Gamma':[], 'Omicron':[],'Otro':[],'Ninguno':[]}
+    counting_representative(table, period, my_key, df_2, writer)
+
+def counting_representative(table, period, my_key, df_2, writer):
+    # empty data/ asigna un valor 0  a todas las posiciones
+        for week_num in range(df_2['week_cont'].max()): # por cada semana
+            table[my_key][week_num+1]=dict()
+            for variant_type in ['Alpha', 'Delta', 'Gamma', 'Omicron','Otro']:
+                table[my_key][week_num+1][variant_type]=0
+                
+        # completa data
+        for j in range(len(df_2)): #por cada semana
+            table[my_key][df_2['week_cont'].iloc[j]][df_2['variant_type'].iloc[j]]=df_2['patients'].iloc[j]          
+        
+        # calculate values
+        for week_num in range(df_2['week_cont'].max()): # por cada semana
+            table[my_key][week_num+1]['week'] =week_num+1
+            for variant_type in ['Alpha', 'Delta', 'Gamma', 'Omicron','Otro']:
+                if not bool(week_num): 
+                    if bool(table[my_key][week_num+1][variant_type]):
+                        table[my_key][week_num+1][variant_type+'_Growth_rate']=100
+                    else:
+                        table[my_key][week_num+1][variant_type+'_Growth_rate']=0
+            
+                elif bool(table[my_key][week_num][variant_type]) and bool(table[my_key][week_num+1][variant_type]):
+                    table[my_key][week_num+1][variant_type+'_Growth_rate'] = (table[my_key][week_num+1][variant_type]/table[my_key][week_num][variant_type])*100
+                else:
+                    if not bool(table[my_key][week_num][variant_type]) and bool(table[my_key][week_num+1][variant_type]):
+                        table[my_key][week_num+1][variant_type+'_Growth_rate']=100
+                    elif bool(table[my_key][week_num][variant_type]) and not bool(table[my_key][week_num+1][variant_type]):
+                        table[my_key][week_num+1][variant_type+'_Growth_rate']=0
+                    else:
+                        table[my_key][week_num+1][variant_type+'_Growth_rate']=0
+            total , max , aux = 0,0,0
+            
+            for variant_type in ['Alpha', 'Delta', 'Gamma', 'Omicron','Otro']:
+            # creación de parametros
+                max = table[my_key][week_num+1][variant_type]
+                total= total + max
+                if max > aux:
+                    aux = max
+                    table[my_key][week_num+1]['predominant']=variant_type
+            
+            if aux == 0:
+                table[my_key][week_num+1]['predominant']='Ninguno'
+                
+            table[my_key][week_num+1]['total'] = total
+            period[my_key][table[my_key][week_num+1]['predominant']].append(week_num+1)
+            
+            for variant_type in ['Alpha', 'Delta', 'Gamma', 'Omicron','Otro']:
+                if table[my_key][week_num+1][variant_type] == 0 or total == 0:
+                    table[my_key][week_num+1]['%_'+variant_type] = 0
+                else:
+                    table[my_key][week_num+1]['%_'+variant_type] = (table[my_key][week_num+1][variant_type]/total)*100
+        autoadjust(pd.DataFrame(table[my_key]).transpose(),my_key,writer)
+
