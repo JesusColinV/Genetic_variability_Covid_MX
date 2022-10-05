@@ -179,12 +179,14 @@ class Counter:
         position = lambda val : int(re.findall("\d+",val.split('_')[1])[0])
         
         # from each amino acid in protein, the characteristics are counted and obtained
+        # e.g. ['Spike_', 'count', 'full', 'change', 'position']
         table_protein = lambda val,count,aa: [
             (val[i],count[i],val[i].split('_')[0],
             position(val[i]), p_p(val[i],aa)) 
             for i in range(len(val))]
         
         # from each amino acid in nonstructural protein, the characteristics are counted and obtained
+        # e.g. ['NSP', 'count', 'full', 'change']
         table_nsp = lambda val,count: [
             (val[i],count[i],val[i].split('_')[0],position(val[i])) 
             for i in range(len(val))]
@@ -245,13 +247,12 @@ class Counter:
             for k,v in amino.items():
                 futures.append(executor.submit(create_df,v,k))
                 
-            dfs = {
+            table = {
                 k:futures[i].result() 
                 for i,k in enumerate(amino.keys())
                 }
 
-        # dfs.to_csv("table.csv")
-        return dfs
+        return table
     
     @staticmethod
     def properties_mutations(
@@ -457,11 +458,12 @@ def get_quinquenios(val:int):
             return (val,k)
 
 
-def age_normalized(df : pd.DataFrame)-> list:
+def age_normalized(df : pd.DataFrame, dic : dict)-> list:
     """ Normalizes the age of patients and recognizes which group they belong to
 
     Args:
         df (pd.DataFrame): data from the gisaid database
+        dic (dict): values to unify the age to a single format
 
     Returns:
         list: _description_
@@ -547,11 +549,27 @@ def state_group_patient_status(df:pd.DataFrame, dic:dict) -> list:
 
     
 def counter( df : pd.DataFrame, dic : dict):
-        amino_unique = Counter.get_mutations(df,dic)
-        table = Counter.get_table(amino_unique,dic)
-        return table
+    """ Generate the table with the count of amino acids, for each group (over or under 18 years)
 
-def autoadjust(df, sheetname, writer):
+    Args:
+        df (pd.DataFrame): filtered group table
+        dic (dict): metadata, with dictionaries 
+
+    Returns:
+        table (dict): table with mutation count and the rest of the characteristics
+    """
+    amino_unique = Counter.get_mutations(df,dic)
+    table = Counter.get_table(amino_unique)
+    return table
+
+def autoadjust( df : pd.DataFrame, sheetname : str, writer : pd.ExcelWriter ):
+    """ formatting for Excel generation
+
+    Args:
+        df (pd.DataFrame): _description_
+        sheetname (str): _description_
+        writer (pd.ExcelWriter): _description_
+    """
     df.to_excel(writer, sheet_name=sheetname, index=False, startrow=1)
     for column in df.columns:
         column_length =  len(str(column))+1
