@@ -82,13 +82,13 @@ class Files:
         
         # Parallel processes
         with ThreadPoolExecutor(max_workers = 4) as executor:
-            
+        
             f1 = executor.submit(m_year,df_cleaned)
             f2 = executor.submit(m_week,df_cleaned)
             f3 = executor.submit(m_week_cont,df_cleaned)
             f4 = executor.submit(m_state,df_cleaned)
             
-        # Assignment to new columns
+        # Generating time features
         df_cleaned['Year'] = f1.result()
         df_cleaned["week"] = f2.result() 
         df_cleaned["week_cont"] = f3.result() 
@@ -169,8 +169,8 @@ class Counter:
             dict: table of each protein with the columns of the mutation count and its characteristics
         """
         # returns the amino acids that belong to the protein delivered as a parameter
-        search_amino = lambda segment,sustitution : [
-            aa for record in sustitution 
+        search_amino = lambda segment,aa_sustitutions : [
+            aa for record in aa_sustitutions 
                 for aa in record.replace(r'(','').replace(r')','').split(',')
                     if bool(re.search(segment,aa))
                     ]
@@ -231,7 +231,7 @@ class Counter:
         return amino
     
     @staticmethod
-    def get_table(amino : dict) -> dict:
+    def dic2df(amino : dict) -> dict:
         #, #Guruprasad L. Human SARS CoV-2 spike protein mutations. Proteins. 2021 May;89(5):569-576. doi: 10.1002/prot.26042. Epub 2021 Jan 17. PMID: 33423311; PMCID: PMC8014176
         futures = list()
         create_df = lambda table, segment: pd.DataFrame(
@@ -240,8 +240,8 @@ class Counter:
                                                 ) if segment != "NSP" else pd.DataFrame(
                                                     table, 
                                                     columns=[segment,"count","full","change"])
-                                                
-                                                
+
+
         with ThreadPoolExecutor(max_workers=len(amino.keys())) as executor:
             
             for k,v in amino.items():
@@ -412,6 +412,7 @@ def m_state(df_cleaned:pd.DataFrame) -> list:
 
 def linage_normalized(df:pd.DataFrame, dic:dict) -> list:
     variant = list()
+    error=[]
     for _df in df:
         if re.search('AY',_df):
             variant.append('Delta')
@@ -423,7 +424,9 @@ def linage_normalized(df:pd.DataFrame, dic:dict) -> list:
                     variant.append(k)
                     break
             else:
-                logging.error("No se identifica la clasificación de: "+ _df)
+                error.append(_df)
+                #logging.error("No se identifica la clasificación de: "+ _df)
+    print(set(error))
     return variant
 
 
@@ -559,7 +562,7 @@ def counter( df : pd.DataFrame, dic : dict):
         table (dict): table with mutation count and the rest of the characteristics
     """
     amino_unique = Counter.get_mutations(df,dic)
-    table = Counter.get_table(amino_unique)
+    table = Counter.dic2df(amino_unique)
     return table
 
 def autoadjust( df : pd.DataFrame, sheetname : str, writer : pd.ExcelWriter ):
@@ -657,17 +660,17 @@ def count_representative_country(
 
 def counting_representative(table, period, my_key, df_2, writer):
     # empty data/ asigna un valor 0  a todas las posiciones
-        for week_num in range(df_2['week_cont'].max()): # por cada semana
+        for week_num in range(df_2['week_cont'].max()): # for each week
             table[my_key][week_num+1]=dict()
             for variant_type in ['Alpha', 'Delta', 'Gamma', 'Omicron','Otro']:
                 table[my_key][week_num+1][variant_type]=0
                 
         # completa data
-        for j in range(len(df_2)): #por cada semana
+        for j in range(len(df_2)): # for each week
             table[my_key][df_2['week_cont'].iloc[j]][df_2['variant_type'].iloc[j]]=df_2['patients'].iloc[j]          
         
         # calculate values
-        for week_num in range(df_2['week_cont'].max()): # por cada semana
+        for week_num in range(df_2['week_cont'].max()): # for each week
             table[my_key][week_num+1]['week'] =week_num+1
             for variant_type in ['Alpha', 'Delta', 'Gamma', 'Omicron','Otro']:
                 if not bool(week_num): 
@@ -688,7 +691,7 @@ def counting_representative(table, period, my_key, df_2, writer):
             total , max , aux = 0,0,0
             
             for variant_type in ['Alpha', 'Delta', 'Gamma', 'Omicron','Otro']:
-            # creación de parametros
+            # create parameters
                 max = table[my_key][week_num+1][variant_type]
                 total= total + max
                 if max > aux:
@@ -708,3 +711,6 @@ def counting_representative(table, period, my_key, df_2, writer):
                     table[my_key][week_num+1]['%_'+variant_type] = (table[my_key][week_num+1][variant_type]/total)*100
         autoadjust(pd.DataFrame(table[my_key]).transpose(),my_key,writer)
 
+def fromisocalendar(y,w,d):
+    date = datetime.datetime.strptime( "%04dW%02d-%d"%(y,w-1,d), "%YW%W-%w")
+    return date.date().strftime("%d/%m/%Y")
