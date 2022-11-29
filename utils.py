@@ -35,7 +35,7 @@ class Files:
     """
         
     @staticmethod
-    def load_dict( dir : str ) -> dict:
+    def load_dict(dir:str) -> dict:
         """ We load the metadata prepared in json format
 
         Args:
@@ -475,7 +475,7 @@ def age_normalized(df : pd.DataFrame, dic : dict)-> list:
     variant = list()
     
     
-    for i in range(len(df)):  
+    for i in range(len(df)):
         
         try:
             
